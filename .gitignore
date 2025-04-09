@@ -1,0 +1,15 @@
+*.pdf
+*.key
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+logs/
+*.egg-info
+.env*
+# Virtual environments
+.venv
+*.ddb
+
