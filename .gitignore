@@ -9,7 +9,9 @@ wheels/
 logs/
 *.egg-info
 .env*
+.python-version
+uv.lock
 # Virtual environments
 .venv
 *.ddb
-
+.ipynb_*
