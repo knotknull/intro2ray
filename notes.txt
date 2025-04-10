@@ -138,8 +138,8 @@ Distributed Data Parallel Training with Ray Train and PyTorch
 |         |                 +-------------------------------------+             |   |
 |         |                 v                                     |             |   |
 | [Data]->|  [Model] --> [Forward] --> [Backward] --> [All   ] --> [Update ]    |   |
-| [Shard] |    ^         [  Pass ]     [  Pass  ]     [Reduce] --> [Weights]    |   |
-|    |    |    |                                         ^                      |   |
+| [Shard] |    ^         [  Pass ]     [  Pass  ]     [Reduce] --> [Weights]    |   +------> [Model Checkpoint ]
+|    |    |    |                                         ^                      |   |        [ and metrics     ]
 |    |    |    |                                         |                  GPU |   |
 |    |    +----+-----------------------------------------+----------------------+   |
 |    |         |                                         |                          |
@@ -152,8 +152,9 @@ Distributed Data Parallel Training with Ray Train and PyTorch
 |    |    |    v                                          v                     |   |
 | [Data]->|  [Model] --> [Forward] --> [Backward] --> [ All  ] -->  [Update ]   |   |
 | [Shard] |              [  Pass ]     [  Pass  ]     [Reduce] -->  [Weights]   |   |
-|    |    |                 ^                                          |        |   |
-|    |    |                 +------------------------------------------+    GPU |   |
+|         |                 ^                                          |        |   |
+|         |                 +------------------------------------------+        |   |
+|         |                                                                 GPU |   |
 |         +---------------------------------------------------------------------+   |
 |                                                                                   |
 |                                                                                   |
