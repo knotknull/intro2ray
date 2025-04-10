@@ -5,7 +5,7 @@ Ray AI Libraries
 http://localhost:8888/notebooks/1_AI_Libs_Intro.ipynb
 
 
-## Lesson 1
+## Lesson 1:  Ray AI Libraries
 
 5 parts to Ray 
 
@@ -100,18 +100,67 @@ In overview the above:
 
 
 
+## Lesson 2:  Ray Train w/ PyTorch
+http://localhost:8888/notebooks/2_Intro_Train.ipynb
+
+Single GPU PyTorch fitting ResNet18 model to MNIST dataset
+ - Training Process 
+
++------------------------------------------------------------------------+
+|                                                                        |
+|        +-----------------------------------------------------------+   |
+|        |                                                           |   |
+|        |                 +-----------------------------+           |   |
+|        |                 v                             |           |   |
+| [Data] |  [Model] --> [Forward] --> [Backward] --> [Update ]       |   |
+|        |              [  Pass ]     [  Pass  ]     [Weights]   GPU |   |
+|        |                                                           |   |
+|        +-----------------------------------------------------------+   |
+|                                                                        |
+|                                                                        |
+|                                                                   CPU  |
++------------------------------------------------------------------------+
 
 
+The lesson takes you thru setting up data and a model to train on a local node and then 
+how this functionality looks utilizing Ray and multiple workers and gpus
+
+i.e. 
+scaling_config = ScalingConfig(num_workers=2, use_gpu=True)
 
 
+Distributed Data Parallel Training with Ray Train and PyTorch
+
++-----------------------------------------------------------------------------------+
+|                                                                                   |
+|         +---------------------------------------------------------------------+   |
+|         |                                                                     |   |
+|         |                 +-------------------------------------+             |   |
+|         |                 v                                     |             |   |
+| [Data]->|  [Model] --> [Forward] --> [Backward] --> [All   ] --> [Update ]    |   |
+| [Shard] |    ^         [  Pass ]     [  Pass  ]     [Reduce] --> [Weights]    |   |
+|    |    |    |                                         ^                      |   |
+|    |    |    |                                         |                  GPU |   |
+|    |    +----+-----------------------------------------+----------------------+   |
+|    |         |                                         |                          |
+|    |       Sync                                      Sync                         |
+| [Dataset]  initial state                             Gradients                    |
+|    |         |                                          |                         |
+|    |         |                                          |                         |
+|    |    +----+-----------------------------------------------+----------------+   |
+|    |    |    |                                          |                     |   |
+|    |    |    v                                          v                     |   |
+| [Data]->|  [Model] --> [Forward] --> [Backward] --> [ All  ] -->  [Update ]   |   |
+| [Shard] |              [  Pass ]     [  Pass  ]     [Reduce] -->  [Weights]   |   |
+|    |    |                 ^                                          |        |   |
+|    |    |                 +------------------------------------------+    GPU |   |
+|         +---------------------------------------------------------------------+   |
+|                                                                                   |
+|                                                                                   |
+|                                                                              CPU  |
++-----------------------------------------------------------------------------------+
 
 
-
-
-
-
-
-
-
+The lesson takes you thru setting up data and a model to train on a local node and then 
 
 .
