@@ -132,15 +132,15 @@ scaling_config = ScalingConfig(num_workers=2, use_gpu=True)
 Distributed Data Parallel Training with Ray Train and PyTorch
 
 +-----------------------------------------------------------------------------------+
-|                                                                                   |
+|                               train.torch.prepare_model                           |
 |         +---------------------------------------------------------------------+   |
 |         |                                                                     |   |
 |         |                 +-------------------------------------+             |   |
-|         |                 v                                     |             |   |
+|         |                 v                                     |             |   |          train.report
 | [Data]->|  [Model] --> [Forward] --> [Backward] --> [All   ] --> [Update ]    |   |
 | [Shard] |    ^         [  Pass ]     [  Pass  ]     [Reduce] --> [Weights]    |   +------> [Model Checkpoint ]
 |    |    |    |                                         ^                      |   |        [ and metrics     ]
-|    |    |    |                                         |                  GPU |   |
+|    |    |    |                                         |                GPU 0 |   |
 |    |    +----+-----------------------------------------+----------------------+   |
 |    |         |                                         |                          |
 |    |       Sync                                      Sync                         |
@@ -154,14 +154,21 @@ Distributed Data Parallel Training with Ray Train and PyTorch
 | [Shard] |              [  Pass ]     [  Pass  ]     [Reduce] -->  [Weights]   |   |
 |         |                 ^                                          |        |   |
 |         |                 +------------------------------------------+        |   |
-|         |                                                                 GPU |   |
+|         |                                                               GPU 1 |   |
 |         +---------------------------------------------------------------------+   |
 |                                                                                   |
-|                                                                                   |
+|train.torch.prepare_data_loader                                                    |
 |                                                                              CPU  |
 +-----------------------------------------------------------------------------------+
 
 
 The lesson takes you thru setting up data and a model to train on a local node and then 
+
+## Lesson 3:  Ray Tune
+
+
+
+
+
 
 .
