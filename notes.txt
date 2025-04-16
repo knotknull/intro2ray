@@ -621,26 +621,308 @@ https://raysummit.anyscale.com/flow/anyscale/raysummit2024/landing/page/sessionc
 ## Lesson 5:  Ray Serve
 notebooks/5_Intro_Serve.ipynb
 
+Ray Serve is a framework for serving ML Applications.
+
+Ray Serve Application is a collection of one or more Deployments that are deployed together
+
+
+  +-------------------------------------------------------------------------------+
+  |                                 Ray Cluster                                   |
+  |                                                                               |
+  |   +---------------------------------+   +---------------------------------+   |
+  |   |            Node 1               |   |            Node N               |   |
+  |   | +------------------------+      |   | +------------------------+      |   |
+  |   | |    [  Deployment  ]    |-+    |   | |    [  Deployment  ]    |-+    |   |
+  |   | |                        | |-+  |   | |                        | |-+  |   |
+  |   | | [Replica1] [Replica N] | | |  |   | | [Replica1] [Replica N] | | |  |   |
+  |   | |                        | | |  |   | |                        | | |  |   |
+  |   | +------------------------+ | |  |   | +------------------------+ | |  |   |
+  |   |   +------------------------+ |  |   |   +------------------------+ |  |   |
+  |   |     +------------------------+  |   |     +------------------------+  |   |
+  |   |                                 |   |                                 |   |
+  |   +---------------------------------+   +---------------------------------+   |
+  |                                                                               |
+  +-------------------------------------------------------------------------------+
+
+ - deployment is fundamental developer element of serve
+ - each deployment can have multiple replicas
+ - each replica can be configured with a set of compute resources
+
+Use cases: 
+ - build end to end ML apps with 
+ - scale up / down compute resource to meed demand
+ - develop on local machine and scale to multi-node GPU cluster
+
+NOTE:  Serve API is same wheter single node or cluster (changes are resource specific)
+
+Features:
+  - response streaming
+        https://docs.ray.io/en/latest/serve/tutorials/streaming.html
+  - dynamic request batching
+        https://docs.ray.io/en/latest/serve/advanced-guides/dyn-req-batch.html
+  - multi-node / multi-gpu serving
+  - model multiplexing
+        https://docs.ray.io/en/latest/serve/model-multiplexing.html
+  - fractional compute resource usage
+        https://docs.ray.io/en/latest/serve/configure-serve-deployment.html
+
+
+# Serving an online classifier
+NOTE: Main differences are the @server.deployment() decorator and the async def function signagures for __call__ and predict
+
+model: 
+!aws s3 cp s3://anyscale-public-materials/ray-ai-libraries/mnist/model/model.pt /mnt/cluster_storage/model.pt
+
+
+@serve.deployment() # this is the decorator to add
+class OnlineMNISTClassifier:
+    def __init__(self, local_path: str):
+        self.model = torch.jit.load(local_path)
+        self.model.to("cuda")
+        self.model.eval()
+
+    async def __call__(self, request: Request) -> dict[str, Any]: # __call__ now takes a Starlette Request object
+        batch = json.loads(await request.json()) # we will need to parse the JSON body of the request
+        return await self.predict(batch)
+    
+    async def predict(self, batch: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        # same code as OfflineMNISTClassifier.predict except we added async to the method
+        images = torch.tensor(batch["image"]).float().to("cuda")
+
+        with torch.no_grad():
+            logits = self.model(images).cpu().numpy()
+
+        batch["predicted_label"] = np.argmax(logits, axis=1)
+        return batch
+
+
+# Instantiate classifier as a Ray Serve App using .bind()
+
+mnist_deployment = OnlineMNISTClassifier.options(
+    num_replicas=1,
+    ray_actor_options={"num_gpus": 1},
+)
+
+mnist_app = mnist_deployment.bind(local_path="/mnt/cluster_storage/model.pt")
+
+
+# Run application
+mnist_deployment_handle = serve.run(mnist_app, name='mnist_classifier', blocking=False)
+
+# Test endpoint: here you are using an http post request to test
+# 
+images = np.random.rand(2, 1, 28, 28).tolist()              # get images
+json_request = json.dumps({"image": images})                # build a json request
+response = requests.post("http://localhost:8000/", json=json_request)   # send request
+response.json()["predicted_label"]                          # get response
+
+
+# Test gRPC endpoint / Call via API instead of requests
+# 
+batch = {"image": np.random.rand(10, 1, 28, 28)}
+response = await mnist_deployment_handle.predict.remote(batch)
+response["predicted_label"]
+
+
+## Advanced fetures of Ray Serve
+
+
+1. Fractional compute (GPU) for each deployment replica
+
+mnist_app = OnlineMNISTClassifier.options(
+    num_replicas=4,                         # we can scale to up to 10 replicas on a single GPU
+    ray_actor_options={"num_gpus": 0.1},    # setting 10% of a GPU
+).bind(local_path="/mnt/cluster_storage/model.pt")
+
+
+# Update running application by running serve.run with the new options.
+mnist_deployment_handle = serve.run(mnist_app, name='mnist_classifier', blocking=False)
+
+
+2. Customizing autoscaling
+
+
+Can setup autoscaling which is based on target number of ongoing requests
+
+mnist_app = OnlineMNISTClassifier.options(
+    ray_actor_options={"num_gpus": 0.1}, 
+    autoscaling_config={
+        "target_ongoing_requests": 10,
+    },
+).bind(local_path="/mnt/cluster_storage/model.pt")
+
+
+Can specify the granularity by setting
+
+- the upscale and downscale delays
+- the intervals at which the replica sends metrics reports about the current number of ongoing requests
+- the look-back period used to evaluate the current number of ongoing requests
+
+i.e. 
+
+
+mnist_app = OnlineMNISTClassifier.options(
+    ray_actor_options={"num_gpus": 0.1}, 
+    autoscaling_config={
+        "target_ongoing_requests": 10,
+        "upscale_delay_s": 10,
+        "downscale_delay_s": 10,
+        "metrics_interval_s": 10,
+        "look_back_period_s": 10, 
+    },
+).bind(local_path="/mnt/cluster_storage/model.pt")
+
+
+Can also set min / max and initial replicase
+
+mnist_app = OnlineMNISTClassifier.options(
+    ray_actor_options={"num_gpus": 0.1}, 
+    autoscaling_config={
+        "target_ongoing_requests": 10,
+        "initial_replicas": 0, # scale up from 0 replicas
+        "min_replicas": 0,
+        "max_replicas": 10,
+        # extreme upscale speeds
+        "upscale_delay_s": 0,
+        "metrics_interval_s": 0.1,
+        "look_back_period_s": 0.1,
+    },
+).bind(local_path="/mnt/cluster_storage/model.pt")
 
 
 
 
 
+3. Composing deployments
+
+Ray Serve allows composition of Deployments 
 
 
 
 
 
+## Preprocessor
+class OnlineMNISTPreprocessor:
+    def __init__(self):
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+        
+    async def run(self, batch: dict[str, Any]) -> dict[str, Any]:
+        images = batch["image"]
+        images = [self.transform(np.array(image, dtype=np.uint8)).cpu().numpy() for image in images]
+        return {"image": images}
+
+
+ # Application ingress that composes OnlineMNISTPreprocessor OnlineMNISTClassifier
+
+@serve.deployment
+class ImageServiceIngress: 
+    def __init__(self, preprocessor: OnlineMNISTPreprocessor, model: OnlineMNISTClassifier):
+        self.preprocessor = preprocessor
+        self.model = model
+
+    async def __call__(self, request: Request):
+        batch = json.loads(await request.json())
+        response = await self.preprocessor.run.remote(batch)
+        return await self.model.predict.remote(response)
+
+# Bind image service with preprocessor and classifier
+# 
+image_classifier_ingress = ImageServiceIngress.bind(
+    preprocessor=OnlineMNISTPreprocessor.bind(),
+    model=OnlineMNISTClassifier.options(
+        num_replicas=1,
+        ray_actor_options={"num_gpus": 0.1},
+    ).bind(local_path="/mnt/cluster_storage/model.pt"),
+)
+
+# Run services
+# 
+handle = serve.run(image_classifier_ingress, name='image_classifier', blocking=False)
+
+# Test
+json_request = json.dumps({"image": image_batch["image"].tolist()}) 
+response = requests.post("http://localhost:8000/", json=json_request)
+response.json()["predicted_label"]
+
+
+NOTE:  So what exactly is going on here. 
+  1. we set up a Preprocessor class 
+  2. next we create an Image Service Ingress class which takes as constructor arguments: 
+        a. a pre-processor
+        b. a classifier
+  3. We instantiate the Image Classifier Intress by binding:  
+        a. the pre-processor
+        b. the classifier
+
+  4. Then we run the service and receive a handle to it
+  5. Lastly we test against the http endpoing
 
 
 
 
 
+4. Integrate with FastAPI
+
+Integrate FastAPI with Ray Server for: 
+ - HTTP routing
+ - Pydantic model validation 
+ - OpenAPI documentation
+
+use @serve.ingress decorator to designate a FastAPI app as the entrypoint for HTTP requests to our Serve application.
+
+app = FastAPI()
+
+@serve.deployment
+@serve.ingress(app)                         # Set FastAPI as ingress
+class ImageServiceIngress:
+    def __init__(self, preprocessor: OnlineMNISTPreprocessor, model: OnlineMNISTClassifier):
+        self.preprocessor = preprocessor
+        self.model = model
+    
+    @app.post("/predict")
+    async def predict(self, request: Request):
+        batch = json.loads(await request.json())
+        response = await self.preprocessor.run.remote(batch)
+        out = await self.model.predict.remote(response)
+        return {"predicted_label": out["predicted_label"].tolist()}
+
+
+# Build and run application
+
+image_classifier_ingress = ImageServiceIngress.bind(
+    preprocessor=OnlineMNISTPreprocessor.bind(),
+    model=OnlineMNISTClassifier.options(
+        num_replicas=1,
+        ray_actor_options={"num_gpus": 0.1},
+    ).bind(local_path="/mnt/cluster_storage/model.pt"),
+)
+
+handle = serve.run(image_classifier_ingress, name='image_classifier', blocking=False)
+
+# Test the app
+json_request = json.dumps({"image": image_batch["image"].tolist()}) 
+response = requests.post("http://localhost:8000/predict", json=json_request)   # Note the /predict route here
+response.json()["predicted_label"]
+
+
+NOTE:  FastAPI comes with OpenAPI (Swagger)
 
 
 
+Ray Serve in Production
 
 
+https://klaviyo.tech/how-klaviyo-built-a-robust-model-serving-platform-with-ray-serve-c02ec65788b3
+
+https://www.samsara.com/blog/building-a-modern-machine-learning-platform-with-ray
+
+
+KubeRay is open source k8s operator
+
+https://docs.ray.io/en/latest/cluster/kubernetes/getting-started.html#kuberay-quickstart
 
 
 .
